@@ -469,7 +469,7 @@ if __name__ == '__main__':
     train(nEpoch=100,
           strRoot='',
           strModelPath='model_unet.pth',
-          nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
+          nChannel=4,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
           nCountDepth=4,
           nBatchSize=1,
           nCountWorker=2,  # 0= CPU / 2 >= GPU
@@ -478,7 +478,7 @@ if __name__ == '__main__':
           bInitEpoch=False)
     test(strRoot='',
          strModelPath='model_unet.pth',
-         nChannel=8,  # 8 : colab / 4 : RTX2070
+         nChannel=4,  # 8 : colab / 4 : RTX2070
          nCountDepth=4,
          nCountWorker=2,  # 0: CPU / 2 : GPU
          dRateDropout=0.3)
