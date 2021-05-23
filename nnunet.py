@@ -460,8 +460,8 @@ def train(nEpoch: int,
             nCountDecrease = 0
         else:
             nCountDecrease += 1
-            # Decrease the learning rate by 2 when the test loss decrease 3 times in a row
-            if nCountDecrease == 3:
+            # Decrease the learning rate by 2 when the test loss decrease 5 times in a row
+            if nCountDecrease == 5:
                 pDicOptimizerState = pOptimizer.state_dict()
                 pDicOptimizerState['param_groups'][0]['lr'] /= 2
                 pOptimizer.load_state_dict(pDicOptimizerState)
@@ -515,7 +515,7 @@ if __name__ == '__main__':
     train(nEpoch=100,
           strRoot='',
           strModelPath='model_nnunet.pth',
-          nChannel=4,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
+          nChannel=4,  # 8 >= VRAM 12GB / 4 >= VRAM 6.5GB
           nCountDepth=4,
           nBatchSize=1,
           nCountWorker=2,  # 0= CPU / 2 >= GPU
