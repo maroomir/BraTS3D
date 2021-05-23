@@ -323,7 +323,7 @@ def __process_evaluate(pModel: UNet3D, pDataLoader: DataLoader):
             pTensorLoss = get_dice_loss(pTensorOutput, pTensorTarget)
             nTotalLoss += pTensorLoss.item() * len(pTensorTarget)
             nLengthSample += len(pTensorTarget)
-            pBar.set_description('{}/{} {:.2f}%, Loss={:.4f}'.
+            pBar.set_description('Evaluate [{}/{} {:.2f}%], Total Loss={:.4f}'.
                                  format(i, len(pDataLoader), 100.0 * (i / len(pDataLoader)),
                                         nTotalLoss / nLengthSample))
     # Fix the CUDA Out of Memory problem
