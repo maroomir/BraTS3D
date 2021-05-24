@@ -437,7 +437,7 @@ def train(nEpoch: int,
     nStart = 0
     print("Directory of the pre-trained model: {}".format(strModelPath))
     if strModelPath is not None and os.path.exists(strModelPath) and bInitEpoch is False:
-        pModelData = torch.load(strModelPath)
+        pModelData = torch.load(strModelPath, map_location=pDevice)
         nStart = pModelData['epoch']
         pModel.load_state_dict(pModelData['model'])
         pOptimizer.load_state_dict(pModelData['optimizer'])

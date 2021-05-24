@@ -438,7 +438,7 @@ def test(strRoot: str,
     # Define a network model
     pModel = UNet3D(nDimInput=4, nDimOutput=4, nChannel=nChannel, nCountDepth=nCountDepth,
                     dRateDropout=dRateDropout).to(pDevice)
-    pModelData = torch.load(strModelPath)
+    pModelData = torch.load(strModelPath, map_location=pDevice)
     pModel.load_state_dict(pModelData['model'])
     pModel.eval()
     print("Successfully load the Model in path")
