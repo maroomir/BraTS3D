@@ -20,12 +20,7 @@ from tqdm import tqdm
 
 
 class BraTsTransform(object):
-    def __init__(self,
-                 bTrain=True):
-        self.is_train = bTrain
-
     def __call__(self,
-                 strFileName: str,
                  pImageT1: ndarray,
                  pImageT1Ce: ndarray,
                  pImageFlair: ndarray,
@@ -47,21 +42,15 @@ class BraTsTransform(object):
         pImageT1Ce = z_normalize(to_tensor(pImageT1Ce))
         pImageFlair = z_normalize(to_tensor(pImageFlair))
         pImageT2 = z_normalize(to_tensor(pImageT2))
-        pTensorInput = torch.cat([pImageT1.unsqueeze(0), pImageT1Ce.unsqueeze(0),
-                                  pImageFlair.unsqueeze(0), pImageT2.unsqueeze(0)], dim=0)
-        if self.is_train:
+        if pTarget is not None:
             pTarget = to_tensor(pTarget)
             pLabelT1 = (pTarget == 0).float()
             pLabelT1Ce = (pTarget == 1).float()
             pLabelFlair = (pTarget == 2).float()
             pLabelT2 = (pTarget == 4).float()
-            pTensorTarget = torch.cat([pLabelT1.unsqueeze(0), pLabelT1Ce.unsqueeze(0),
-                                       pLabelFlair.unsqueeze(0), pLabelT2.unsqueeze(0)], dim=0)
-            pTarget[pTarget == 4] = 3
-            pTarget = pTarget.unsqueeze(0)
-            return pTensorInput, pTensorTarget, pTarget, strFileName
+            return (pImageT1, pLabelT1), (pImageT1Ce, pLabelT1Ce), (pImageFlair, pLabelFlair), (pImageT2, pLabelT2)
         else:
-            return pTensorInput, strFileName
+            return pImageT1, pImageT1Ce, pImageFlair, pImageT2
 
 
 class BraTsDataset(Dataset):
@@ -104,45 +93,24 @@ class BraTsDataset(Dataset):
         if self.is_train:
             pImageTarget = SimpleITK.GetArrayFromImage(SimpleITK.ReadImage(os.path.join(str(pPath), strFileSeg))) \
                 .astype(numpy.float32)
-            return self.transform(pPath.name, pImageT1, pImageT1Ce, pImageFlair, pImageT2, pImageTarget)
+            return self.transform(pImageT1, pImageT1Ce, pImageFlair, pImageT2, pImageTarget)
         else:
-            return self.transform(pPath.name, pImageT1, pImageT1Ce, pImageFlair, pImageT2)
+            return self.transform(pImageT1, pImageT1Ce, pImageFlair, pImageT2)
 
 
-def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
-                    pTensorTarget: tensor,  # Batch, 4, ??, ??, ??
+def get_custom_loss(pTensorPredict: tensor,  # Batch, ??, ??, ??
+                    pTensorTarget: tensor,  # Batch, ??, ??, ??
                     dSmooth=1e-4):
     pFuncBCELoss = torch.nn.BCEWithLogitsLoss()
-    pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
-                                         pTensorTarget[:, 0, :, :, :],
-                                         dSmooth)
-    pTensorBceBG = pFuncBCELoss(pTensorPredict[:, 0, :, :, :],
-                                pTensorTarget[:, 0, :, :, :])
-    pTensorDiceNCR = get_dice_coefficient(pTensorPredict[:, 1, :, :, :],
-                                          pTensorTarget[:, 1, :, :, :],
-                                          dSmooth)
-    pTensorBceNCR = pFuncBCELoss(pTensorPredict[:, 1, :, :, :],
-                                 pTensorTarget[:, 1, :, :, :])
-    pTensorDiceED = get_dice_coefficient(pTensorPredict[:, 2, :, :, :],
-                                         pTensorTarget[:, 2, :, :, :],
-                                         dSmooth)
-    pTensorBceED = pFuncBCELoss(pTensorPredict[:, 2, :, :, :],
-                                pTensorTarget[:, 2, :, :, :])
-    pTensorDiceSET = get_dice_coefficient(pTensorPredict[:, 3, :, :, :],
-                                          pTensorTarget[:, 3, :, :, :],
-                                          dSmooth)
-    pTensorBceSET = pFuncBCELoss(pTensorPredict[:, 3, :, :, :],
-                                 pTensorTarget[:, 3, :, :, :])
-    pTensorDice = 1 - (pTensorDiceBG + pTensorDiceNCR + pTensorDiceED + pTensorDiceSET) / 4
-    pTensorBCE = (pTensorBceBG + pTensorBceNCR + pTensorBceED + pTensorBceSET) / 4
-    return pTensorDice + pTensorBCE
+    pTensorDice = 1 - get_dice_coefficient(pTensorPredict, pTensorTarget, dSmooth)
+    return pTensorDice + pFuncBCELoss(pTensorPredict, pTensorTarget)
 
 
 def get_dice_coefficient(pTensorPredict: tensor,
                          pTensorTarget: tensor,
                          dSmooth=1e-4):
-    pTensorPredict = pTensorPredict.contiguous().view(-1)
-    pTensorTarget = pTensorTarget.contiguous().view(-1)
+    pTensorPredict = pTensorPredict.contiguous().view(-1)  # Change order = 1
+    pTensorTarget = pTensorTarget.contiguous().view(-1)  # Change order = 1
     pTensorIntersection = (pTensorPredict * pTensorTarget).sum()
     pTensorCoefficient = (2.0 * pTensorIntersection + dSmooth) / (pTensorPredict.sum() + pTensorTarget.sum() + dSmooth)
     return pTensorCoefficient
@@ -291,15 +259,13 @@ class nnUNet3D(Module):
             pTensorAttached = pListStack.pop()
             pTensorResult = pSampler(pTensorResult)
             # Reflect pad on the right/botton if needed to handle odd input dimensions.
-            pPadding = [0, 0, 0, 0, 0, 0]  # left, right, top, bottom
+            pPadding = [0, 0, 0, 0]  # left, right
             if pTensorResult.shape[-1] != pTensorAttached.shape[-1]:
                 pPadding[1] = 1  # Padding right
             if pTensorResult.shape[-2] != pTensorAttached.shape[-2]:
                 pPadding[3] = 1  # Padding bottom
-            if pTensorResult.shape[-3] != pTensorAttached.shape[-3]:
-                pPadding[5] = 1
             if sum(pPadding) != 0:
-                pTensorResult = torch.nn.functional.pad(pTensorResult, pPadding, "replicate")
+                pTensorResult = torch.nn.functional.pad(pTensorResult, pPadding, "reflect")
             pTensorResult = torch.cat([pTensorResult, pTensorAttached], dim=1)
             # To Fix the CUDA Memory overflow
             if torch.cuda.is_available():
@@ -324,8 +290,15 @@ def __process_train(nEpoch: int, pModel: Module, pDataLoader: DataLoader, pOptim
     nLengthSample = 0
     nTotalLoss = 0
     nTotalAcc = 0
-    for i, (pTensorInput, pTensorTarget, pTensorLabel, strFileName) in pBar:
-        # Move data and label to device
+    for i, (pPairT1, pPairT1Ce, pPairFlair, pPairT2) in pBar:
+        # Calculate T1
+        pTensorInput = pPairT1[0].to(pDevice)
+        pTensorTarget = pPairT1[1].to(pDevice)
+        pTensorOutput = pModel(pTensorInput)
+        pTensorPredict = torch.argmax(pTensorOutput, dim=1)
+
+
+
         pTensorInput = pTensorInput.to(pDevice)
         pTensorTarget = pTensorTarget.to(pDevice)
         pTensorLabel = pTensorLabel.to(pDevice)
