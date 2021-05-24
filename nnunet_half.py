@@ -20,7 +20,12 @@ from tqdm import tqdm
 
 
 class BraTsTransform(object):
+    def __init__(self,
+                 bTrain=True):
+        self.is_train = bTrain
+
     def __call__(self,
+                 strFileName: str,
                  pImageT1: ndarray,
                  pImageT1Ce: ndarray,
                  pImageFlair: ndarray,
@@ -42,15 +47,21 @@ class BraTsTransform(object):
         pImageT1Ce = z_normalize(to_tensor(pImageT1Ce))
         pImageFlair = z_normalize(to_tensor(pImageFlair))
         pImageT2 = z_normalize(to_tensor(pImageT2))
-        if pTarget is not None:
+        pTensorInput = torch.cat([pImageT1.unsqueeze(0), pImageT1Ce.unsqueeze(0),
+                                  pImageFlair.unsqueeze(0), pImageT2.unsqueeze(0)], dim=0)
+        if self.is_train:
             pTarget = to_tensor(pTarget)
             pLabelT1 = (pTarget == 0).float()
             pLabelT1Ce = (pTarget == 1).float()
             pLabelFlair = (pTarget == 2).float()
             pLabelT2 = (pTarget == 4).float()
-            return (pImageT1, pLabelT1), (pImageT1Ce, pLabelT1Ce), (pImageFlair, pLabelFlair), (pImageT2, pLabelT2)
+            pTensorTarget = torch.cat([pLabelT1.unsqueeze(0), pLabelT1Ce.unsqueeze(0),
+                                       pLabelFlair.unsqueeze(0), pLabelT2.unsqueeze(0)], dim=0)
+            pTarget[pTarget == 4] = 3
+            pTarget = pTarget.unsqueeze(0)
+            return pTensorInput, pTensorTarget, pTarget, strFileName
         else:
-            return pImageT1, pImageT1Ce, pImageFlair, pImageT2
+            return pTensorInput, strFileName
 
 
 class BraTsDataset(Dataset):
@@ -93,24 +104,45 @@ class BraTsDataset(Dataset):
         if self.is_train:
             pImageTarget = SimpleITK.GetArrayFromImage(SimpleITK.ReadImage(os.path.join(str(pPath), strFileSeg))) \
                 .astype(numpy.float32)
-            return self.transform(pImageT1, pImageT1Ce, pImageFlair, pImageT2, pImageTarget)
+            return self.transform(pPath.name, pImageT1, pImageT1Ce, pImageFlair, pImageT2, pImageTarget)
         else:
-            return self.transform(pImageT1, pImageT1Ce, pImageFlair, pImageT2)
+            return self.transform(pPath.name, pImageT1, pImageT1Ce, pImageFlair, pImageT2)
 
 
-def get_custom_loss(pTensorPredict: tensor,  # Batch, ??, ??, ??
-                    pTensorTarget: tensor,  # Batch, ??, ??, ??
+def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
+                    pTensorTarget: tensor,  # Batch, 4, ??, ??, ??
                     dSmooth=1e-4):
     pFuncBCELoss = torch.nn.BCEWithLogitsLoss()
-    pTensorDice = 1 - get_dice_coefficient(pTensorPredict, pTensorTarget, dSmooth)
-    return pTensorDice + pFuncBCELoss(pTensorPredict, pTensorTarget)
+    pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
+                                         pTensorTarget[:, 0, :, :, :],
+                                         dSmooth)
+    pTensorBceBG = pFuncBCELoss(pTensorPredict[:, 0, :, :, :],
+                                pTensorTarget[:, 0, :, :, :])
+    pTensorDiceNCR = get_dice_coefficient(pTensorPredict[:, 1, :, :, :],
+                                          pTensorTarget[:, 1, :, :, :],
+                                          dSmooth)
+    pTensorBceNCR = pFuncBCELoss(pTensorPredict[:, 1, :, :, :],
+                                 pTensorTarget[:, 1, :, :, :])
+    pTensorDiceED = get_dice_coefficient(pTensorPredict[:, 2, :, :, :],
+                                         pTensorTarget[:, 2, :, :, :],
+                                         dSmooth)
+    pTensorBceED = pFuncBCELoss(pTensorPredict[:, 2, :, :, :],
+                                pTensorTarget[:, 2, :, :, :])
+    pTensorDiceSET = get_dice_coefficient(pTensorPredict[:, 3, :, :, :],
+                                          pTensorTarget[:, 3, :, :, :],
+                                          dSmooth)
+    pTensorBceSET = pFuncBCELoss(pTensorPredict[:, 3, :, :, :],
+                                 pTensorTarget[:, 3, :, :, :])
+    pTensorDice = 1 - (pTensorDiceBG + pTensorDiceNCR + pTensorDiceED + pTensorDiceSET) / 4
+    pTensorBCE = (pTensorBceBG + pTensorBceNCR + pTensorBceED + pTensorBceSET) / 4
+    return pTensorDice + pTensorBCE
 
 
 def get_dice_coefficient(pTensorPredict: tensor,
                          pTensorTarget: tensor,
                          dSmooth=1e-4):
-    pTensorPredict = pTensorPredict.contiguous().view(-1)  # Change order = 1
-    pTensorTarget = pTensorTarget.contiguous().view(-1)  # Change order = 1
+    pTensorPredict = pTensorPredict.contiguous().view(-1)
+    pTensorTarget = pTensorTarget.contiguous().view(-1)
     pTensorIntersection = (pTensorPredict * pTensorTarget).sum()
     pTensorCoefficient = (2.0 * pTensorIntersection + dSmooth) / (pTensorPredict.sum() + pTensorTarget.sum() + dSmooth)
     return pTensorCoefficient
@@ -259,13 +291,15 @@ class nnUNet3D(Module):
             pTensorAttached = pListStack.pop()
             pTensorResult = pSampler(pTensorResult)
             # Reflect pad on the right/botton if needed to handle odd input dimensions.
-            pPadding = [0, 0, 0, 0]  # left, right
+            pPadding = [0, 0, 0, 0, 0, 0]  # left, right, top, bottom
             if pTensorResult.shape[-1] != pTensorAttached.shape[-1]:
                 pPadding[1] = 1  # Padding right
             if pTensorResult.shape[-2] != pTensorAttached.shape[-2]:
                 pPadding[3] = 1  # Padding bottom
+            if pTensorResult.shape[-3] != pTensorAttached.shape[-3]:
+                pPadding[5] = 1
             if sum(pPadding) != 0:
-                pTensorResult = torch.nn.functional.pad(pTensorResult, pPadding, "reflect")
+                pTensorResult = torch.nn.functional.pad(pTensorResult, pPadding, "replicate")
             pTensorResult = torch.cat([pTensorResult, pTensorAttached], dim=1)
             # To Fix the CUDA Memory overflow
             if torch.cuda.is_available():
@@ -290,20 +324,14 @@ def __process_train(nEpoch: int, pModel: Module, pDataLoader: DataLoader, pOptim
     nLengthSample = 0
     nTotalLoss = 0
     nTotalAcc = 0
-    for i, (pPairT1, pPairT1Ce, pPairFlair, pPairT2) in pBar:
-        # Calculate T1
-        pTensorInput = pPairT1[0].to(pDevice)
-        pTensorTarget = pPairT1[1].to(pDevice)
-        pTensorOutput = pModel(pTensorInput)
-        pTensorPredict = torch.argmax(pTensorOutput, dim=1)
-
-
-
-        pTensorInput = pTensorInput.to(pDevice)
-        pTensorTarget = pTensorTarget.to(pDevice)
-        pTensorLabel = pTensorLabel.to(pDevice)
+    for i, (pTensorInput, pTensorTarget, pTensorLabel, strFileName) in pBar:
+        # Move data and label to device
+        pTensorInput = pTensorInput.type(torch.HalfTensor).to(pDevice)
+        pTensorTarget = pTensorTarget.type(torch.HalfTensor).to(pDevice)
+        pTensorLabel = pTensorLabel.type(torch.HalfTensor).to(pDevice)
         # Pass the input data through the defined network architecture
-        pTensorOutput = pModel(pTensorInput)  # Shape : (batch, 4, 155, 240, 240)
+        with torch.cuda.amp.autocast():  # Fix the error by the miss-casting of weight tensor
+            pTensorOutput = pModel(pTensorInput)  # Shape : (batch, 4, 155, 240, 240)
         pTensorPredict = torch.argmax(pTensorOutput, dim=1)  # shape : (batch, 155, 240, 240)
         # Compute a loss function
         pTensorLoss = get_custom_loss(pTensorOutput, pTensorTarget)  # shape : (batch, 155, 240, 240)
@@ -350,10 +378,11 @@ def __process_evaluate(pModel: Module, pDataLoader: DataLoader):
     with torch.no_grad():
         for i, (pTensorInput, pTensorTarget, pTensorLabel, strFileName) in pBar:
             # Move data and label to device
-            pTensorInput = pTensorInput.to(pDevice)
-            pTensorTarget = pTensorTarget.to(pDevice)
+            pTensorInput = pTensorInput.type(torch.HalfTensor).to(pDevice)
+            pTensorTarget = pTensorTarget.type(torch.HalfTensor).to(pDevice)
             # Pass the input data through the defined network architecture
-            pTensorOutput = pModel(pTensorInput)  # Module
+            with torch.cuda.amp.autocast():  # Fix the error by the miss-casting of weight tensor
+                pTensorOutput = pModel(pTensorInput)  # Module
             # Compute a loss function
             pTensorLoss = get_custom_loss(pTensorOutput, pTensorTarget)
             nTotalLoss += pTensorLoss.item() * len(pTensorTarget)
@@ -506,16 +535,16 @@ if __name__ == '__main__':
     if mode == 'all':
         train(nEpoch=100,
               strRoot='',
-              strModelPath='model_nnunet.pth',
+              strModelPath='model_nnunet_half.pth',
               nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
               nCountDepth=4,
               nBatchSize=1,
-              nCountWorker=2,  # 0= CPU / 2 >= GPU
+              nCountWorker=0,  # 0= CPU / 2 >= GPU
               dRateDropout=0.3,
               dLearningRate=0.01,
               bInitEpoch=False)
         test(strRoot='',
-             strModelPath='model_nnunet.pth',
+             strModelPath='model_nnunet_half.pth',
              nChannel=8,  # 8 : colab / 4 : RTX2070
              nCountDepth=4,
              nCountWorker=2,  # 0: CPU / 2 : GPU
@@ -523,20 +552,20 @@ if __name__ == '__main__':
     elif mode == 'train':
         train(nEpoch=100,
               strRoot='',
-              strModelPath='model_nnunet.pth',
+              strModelPath='model_nnunet_half.pth',
               nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
               nCountDepth=4,
               nBatchSize=1,
-              nCountWorker=2,  # 0= CPU / 2 >= GPU
+              nCountWorker=0,  # 0= CPU / 2 >= GPU
               dRateDropout=0.3,
               dLearningRate=0.01,
               bInitEpoch=False)
     elif mode == 'test':
         test(strRoot='',
-             strModelPath='model_nnunet.pth',
+             strModelPath='model_nnunet_half.pth',
              nChannel=8,  # 8 : colab / 4 : RTX2070
              nCountDepth=4,
-             nCountWorker=2,  # 0: CPU / 2 : GPU
+             nCountWorker=0,  # 0: CPU / 2 : GPU
              dRateDropout=0.3)
     else:
         pass
