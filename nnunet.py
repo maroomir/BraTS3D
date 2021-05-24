@@ -109,33 +109,22 @@ class BraTsDataset(Dataset):
             return self.transform(pPath.name, pImageT1, pImageT1Ce, pImageFlair, pImageT2)
 
 
-def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
-                    pTensorTarget: tensor,  # Batch, 4, ??, ??, ??
-                    dSmooth=1e-4):
-    pFuncBCELoss = torch.nn.BCEWithLogitsLoss()
+def get_dice_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
+                  pTensorTarget: tensor,  # Batch, 4, ??, ??, ??
+                  dSmooth=1e-4):
     pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
                                          pTensorTarget[:, 0, :, :, :],
                                          dSmooth)
-    pTensorBceBG = pFuncBCELoss(pTensorPredict[:, 0, :, :, :],
-                                pTensorTarget[:, 0, :, :, :])
     pTensorDiceNCR = get_dice_coefficient(pTensorPredict[:, 1, :, :, :],
                                           pTensorTarget[:, 1, :, :, :],
                                           dSmooth)
-    pTensorBceNCR = pFuncBCELoss(pTensorPredict[:, 1, :, :, :],
-                                 pTensorTarget[:, 1, :, :, :])
     pTensorDiceED = get_dice_coefficient(pTensorPredict[:, 2, :, :, :],
                                          pTensorTarget[:, 2, :, :, :],
                                          dSmooth)
-    pTensorBceED = pFuncBCELoss(pTensorPredict[:, 2, :, :, :],
-                                pTensorTarget[:, 2, :, :, :])
     pTensorDiceSET = get_dice_coefficient(pTensorPredict[:, 3, :, :, :],
                                           pTensorTarget[:, 3, :, :, :],
                                           dSmooth)
-    pTensorBceSET = pFuncBCELoss(pTensorPredict[:, 3, :, :, :],
-                                 pTensorTarget[:, 3, :, :, :])
-    pTensorDice = 1 - (pTensorDiceBG + pTensorDiceNCR + pTensorDiceED + pTensorDiceSET) / 4
-    pTensorBCE = (pTensorBceBG + pTensorBceNCR + pTensorBceED + pTensorBceSET) / 4
-    return pTensorDice + pTensorBCE
+    return 1 - (pTensorDiceBG + pTensorDiceNCR + pTensorDiceED + pTensorDiceSET) / 4
 
 
 def get_dice_coefficient(pTensorPredict: tensor,
@@ -329,7 +318,7 @@ def __process_train(nEpoch: int, pModel: Module, pDataLoader: DataLoader, pOptim
         pTensorOutput = pModel(pTensorInput)  # Shape : (batch, 4, 155, 240, 240)
         pTensorPredict = torch.argmax(pTensorOutput, dim=1)  # shape : (batch, 155, 240, 240)
         # Compute a loss function
-        pTensorLoss = get_custom_loss(pTensorOutput, pTensorTarget)  # shape : (batch, 155, 240, 240)
+        pTensorLoss = get_dice_loss(pTensorOutput, pTensorTarget)  # shape : (batch, 155, 240, 240)
         # Compute network accuracy
         pPredictBG = (pTensorPredict == 0)
         pTargetBG = (pTensorLabel == 0).squeeze(1)  # shape : (batch, 155, 240, 240)
@@ -377,10 +366,10 @@ def __process_evaluate(pModel: Module, pDataLoader: DataLoader):
             # Pass the input data through the defined network architecture
             pTensorOutput = pModel(pTensorInput)  # Module
             # Compute a loss function
-            pTensorLoss = get_custom_loss(pTensorOutput, pTensorTarget)
+            pTensorLoss = get_dice_loss(pTensorOutput, pTensorTarget)
             nTotalLoss += pTensorLoss.item() * len(pTensorTarget)
             nLengthSample += len(pTensorTarget)
-            pBar.set_description('{}/{} {:.2f}%, Loss={:.4f}'.
+            pBar.set_description('Evaluate [{}/{} {:.2f}%], Total Loss={:.4f}'.
                                  format(i, len(pDataLoader), 100.0 * (i / len(pDataLoader)),
                                         nTotalLoss / nLengthSample))
     # Fix the CUDA Out of Memory problem
@@ -390,7 +379,7 @@ def __process_evaluate(pModel: Module, pDataLoader: DataLoader):
     return nTotalLoss / nLengthSample
 
 
-def __save_result_to_nii(pDicSegmentation: dict, strDirValidation: str, pPathResult=pathlib.Path('Result_nnUNet/')):
+def __save_result_to_nii(pDicSegmentation: dict, strDirValidation: str, pPathResult=pathlib.Path('Result/')):
     pPathResult.mkdir(exist_ok=True)
     for strPath, pData in pDicSegmentation.items():
         strFileDefault = strPath + '_t1.nii.gz'
@@ -455,7 +444,7 @@ def train(nEpoch: int,
         if math.isnan(dLoss):
             if strModelPath is not None and os.path.exists(strModelPath):
                 # Reload the best model and decrease the learning rate
-                pModelData = torch.load(strModelPath, map_location=pDevice)
+                pModelData = torch.load(strModelPath)
                 pModel.load_state_dict(pModelData['model'])
                 nStart = pModelData['epoch']
                 pOptimizerData = pModelData['optimizer']
@@ -471,8 +460,8 @@ def train(nEpoch: int,
             nCountDecrease = 0
         else:
             nCountDecrease += 1
-            # Decrease the learning rate by 2 when the test loss decrease 3 times in a row
-            if nCountDecrease == 3:
+            # Decrease the learning rate by 2 when the test loss decrease 5 times in a row
+            if nCountDecrease == 5:
                 pDicOptimizerState = pOptimizer.state_dict()
                 pDicOptimizerState['param_groups'][0]['lr'] /= 2
                 pOptimizer.load_state_dict(pDicOptimizerState)
@@ -495,7 +484,7 @@ def test(strRoot: str,
     # Define a network model
     pModel = nnUNet3D(nDimInput=4, nDimOutput=4, nChannel=nChannel, nCountDepth=nCountDepth,
                       dRateDropout=dRateDropout).to(pDevice)
-    pModelData = torch.load(strModelPath, map_location=pDevice)
+    pModelData = torch.load(strModelPath)
     pModel.load_state_dict(pModelData['model'])
     pModel.eval()
     print("Successfully load the Model in path")
@@ -523,41 +512,19 @@ def test(strRoot: str,
 
 
 if __name__ == '__main__':
-    mode = 'train'
-    if mode == 'all':
-        train(nEpoch=100,
-              strRoot='',
-              strModelPath='model_nnunet.pth',
-              nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
-              nCountDepth=4,
-              nBatchSize=1,
-              nCountWorker=2,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.3,
-              dLearningRate=0.01,
-              bInitEpoch=False)
-        test(strRoot='',
-             strModelPath='model_nnunet.pth',
-             nChannel=8,  # 8 : colab / 4 : RTX2070
-             nCountDepth=4,
-             nCountWorker=2,  # 0: CPU / 2 : GPU
-             dRateDropout=0.3)
-    elif mode == 'train':
-        train(nEpoch=100,
-              strRoot='',
-              strModelPath='model_nnunet.pth',
-              nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
-              nCountDepth=4,
-              nBatchSize=1,
-              nCountWorker=2,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.3,
-              dLearningRate=0.01,
-              bInitEpoch=False)
-    elif mode == 'test':
-        test(strRoot='',
-             strModelPath='model_nnunet.pth',
-             nChannel=8,  # 8 : colab / 4 : RTX2070
-             nCountDepth=4,
-             nCountWorker=2,  # 0: CPU / 2 : GPU
-             dRateDropout=0.3)
-    else:
-        pass
+    train(nEpoch=100,
+          strRoot='',
+          strModelPath='model_nnunet.pth',
+          nChannel=4,  # 8 >= VRAM 12GB / 4 >= VRAM 6.5GB
+          nCountDepth=4,
+          nBatchSize=1,
+          nCountWorker=2,  # 0= CPU / 2 >= GPU
+          dRateDropout=0.3,
+          dLearningRate=0.01,
+          bInitEpoch=False)
+    test(strRoot='',
+         strModelPath='model_nnunet.pth',
+         nChannel=4,  # 8 : colab / 4 : RTX2070
+         nCountDepth=4,
+         nCountWorker=2,  # 0: CPU / 2 : GPU
+         dRateDropout=0.3)
