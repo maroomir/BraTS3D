@@ -13,7 +13,7 @@ from collections import defaultdict
 from numpy import ndarray
 from torch import tensor
 from torch.nn import Module
-from torch.optim import Adam
+from torch.optim import SGD
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from tqdm import tqdm
@@ -311,7 +311,7 @@ class nnUNet3D(Module):
         return pTensorResult
 
 
-def __process_train(nEpoch: int, pModel: Module, pDataLoader: DataLoader, pOptimizer: Adam):
+def __process_train(nEpoch: int, pModel: Module, pDataLoader: DataLoader, pOptimizer: SGD):
     # Check if we can use a GPU Device
     if torch.cuda.is_available():
         pDevice = torch.device('cuda')
@@ -435,8 +435,8 @@ def train(nEpoch: int,
     # Define a network model
     pModel = nnUNet3D(nDimInput=4, nDimOutput=4, nChannel=nChannel, nCountDepth=nCountDepth,
                       dRateDropout=dRateDropout).to(pDevice)
-    # Set the optimizer with adam
-    pOptimizer = torch.optim.Adam(pModel.parameters(), lr=dLearningRate)
+    # Set the optimizer with SGD
+    pOptimizer = torch.optim.SGD(pModel.parameters(), lr=dLearningRate)
     # Set the scheduler
     pScheduler = torch.optim.lr_scheduler.StepLR(pOptimizer, step_size=1)
     # Load pre-trained model
@@ -470,7 +470,7 @@ def train(nEpoch: int,
                 print("## Rollback the model at {} epochs!".format(nStart))
                 nCountDecrease = 0
         # Save the optimal model
-        elif dLoss < dMinLoss:
+        elif dLoss <= dMinLoss:
             dMinLoss = dLoss
             torch.save({'epoch': iEpoch, 'model': pModel.state_dict(), 'optimizer': pOptimizer.state_dict()},
                        strModelPath)
