@@ -116,26 +116,17 @@ def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
     pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
                                          pTensorTarget[:, 0, :, :, :],
                                          dSmooth)
-    pTensorBceBG = pFuncBCELoss(pTensorPredict[:, 0, :, :, :],
-                                pTensorTarget[:, 0, :, :, :])
     pTensorDiceNCR = get_dice_coefficient(pTensorPredict[:, 1, :, :, :],
                                           pTensorTarget[:, 1, :, :, :],
                                           dSmooth)
-    pTensorBceNCR = pFuncBCELoss(pTensorPredict[:, 1, :, :, :],
-                                 pTensorTarget[:, 1, :, :, :])
     pTensorDiceED = get_dice_coefficient(pTensorPredict[:, 2, :, :, :],
                                          pTensorTarget[:, 2, :, :, :],
                                          dSmooth)
-    pTensorBceED = pFuncBCELoss(pTensorPredict[:, 2, :, :, :],
-                                pTensorTarget[:, 2, :, :, :])
     pTensorDiceSET = get_dice_coefficient(pTensorPredict[:, 3, :, :, :],
                                           pTensorTarget[:, 3, :, :, :],
                                           dSmooth)
-    pTensorBceSET = pFuncBCELoss(pTensorPredict[:, 3, :, :, :],
-                                 pTensorTarget[:, 3, :, :, :])
     pTensorDice = 1 - (pTensorDiceBG + pTensorDiceNCR + pTensorDiceED + pTensorDiceSET) / 4
-    pTensorBCE = (pTensorBceBG + pTensorBceNCR + pTensorBceED + pTensorBceSET) / 4
-    return pTensorDice + pTensorBCE
+    return pTensorDice + pFuncBCELoss(pTensorPredict, pTensorTarget)
 
 
 def get_dice_coefficient(pTensorPredict: tensor,
@@ -143,7 +134,9 @@ def get_dice_coefficient(pTensorPredict: tensor,
                          dSmooth=1e-4):
     pTensorPredict = pTensorPredict.contiguous().view(-1)
     pTensorTarget = pTensorTarget.contiguous().view(-1)
-    pTensorIntersection = (pTensorPredict * pTensorTarget).sum()
+    pTensorPredict = pTensorPredict.detach().cpu().numpy().astype(numpy.bool)
+    pTensorTarget = pTensorTarget.detach().cpu().numpy().astype(numpy.bool)
+    pTensorIntersection = numpy.logical_and(pTensorPredict, pTensorTarget).sum()
     pTensorCoefficient = (2.0 * pTensorIntersection + dSmooth) / (pTensorPredict.sum() + pTensorTarget.sum() + dSmooth)
     return pTensorCoefficient
 
@@ -156,11 +149,11 @@ class Convolution(Module):
         super(Convolution, self).__init__()
         self.network = torch.nn.Sequential(
             torch.nn.Conv3d(nDimInput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.InstanceNorm3d(nDimOutput),
+            torch.nn.BatchNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.InstanceNorm3d(nDimOutput),
+            torch.nn.BatchNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout)
         )
@@ -178,11 +171,11 @@ class ConvolutionForEncoder(Module):
         self.network = torch.nn.Sequential(
             # Down-sampling per 2 stride
             torch.nn.Conv3d(nDimInput, nDimOutput, kernel_size=3, stride=2, padding=0, bias=False),
-            torch.nn.InstanceNorm3d(nDimOutput),
+            torch.nn.BatchNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=2, stride=1, padding=1, bias=False),
-            torch.nn.InstanceNorm3d(nDimOutput),
+            torch.nn.BatchNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
         )
 
@@ -198,13 +191,12 @@ class ConvolutionForDecoder(Module):
         super(ConvolutionForDecoder, self).__init__()
         self.network = torch.nn.Sequential(
             torch.nn.Conv3d(nDimInput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.InstanceNorm3d(nDimOutput),
+            torch.nn.BatchNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.InstanceNorm3d(nDimOutput),
+            torch.nn.BatchNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=1, stride=1),
             torch.nn.Softmax(dim=1)
         )
@@ -220,7 +212,7 @@ class UpSampler(Module):
         super(UpSampler, self).__init__()
         self.network = torch.nn.Sequential(
             torch.nn.ConvTranspose3d(nDimInput, nDimOutput, kernel_size=2, stride=2, bias=True),
-            torch.nn.InstanceNorm3d(nDimOutput),
+            torch.nn.BatchNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
         )
 
@@ -477,8 +469,8 @@ def train(nEpoch: int,
             nCountDecrease = 0
         else:
             nCountDecrease += 1
-            # Decrease the learning rate by 2 when the test loss decrease 3 times in a row
-            if nCountDecrease == 3:
+            # Decrease the learning rate by 2 when the test loss decrease 10 times in a row
+            if nCountDecrease == 10:
                 pDicOptimizerState = pOptimizer.state_dict()
                 pDicOptimizerState['param_groups'][0]['lr'] /= 2
                 pOptimizer.load_state_dict(pDicOptimizerState)
@@ -538,7 +530,7 @@ if __name__ == '__main__':
               nCountDepth=4,
               nBatchSize=1,
               nCountWorker=2,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.3,
+              dRateDropout=0.5,
               dLearningRate=0.01,
               bInitEpoch=False)
         test(strRoot='',
@@ -555,7 +547,7 @@ if __name__ == '__main__':
               nCountDepth=4,
               nBatchSize=1,
               nCountWorker=2,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.3,
+              dRateDropout=0.5,
               dLearningRate=0.01,
               bInitEpoch=False)
     elif mode == 'test':
