@@ -134,9 +134,7 @@ def get_dice_coefficient(pTensorPredict: tensor,
                          dSmooth=1e-4):
     pTensorPredict = pTensorPredict.contiguous().view(-1)
     pTensorTarget = pTensorTarget.contiguous().view(-1)
-    pTensorPredict = pTensorPredict.detach().cpu().numpy().astype(numpy.bool)
-    pTensorTarget = pTensorTarget.detach().cpu().numpy().astype(numpy.bool)
-    pTensorIntersection = numpy.logical_and(pTensorPredict, pTensorTarget).sum()
+    pTensorIntersection = (pTensorPredict * pTensorTarget).sum()
     pTensorCoefficient = (2.0 * pTensorIntersection + dSmooth) / (pTensorPredict.sum() + pTensorTarget.sum() + dSmooth)
     return pTensorCoefficient
 
