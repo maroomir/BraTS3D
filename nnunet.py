@@ -111,7 +111,7 @@ class BraTsDataset(Dataset):
 
 def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
                     pTensorTarget: tensor,  # Batch, 4, ??, ??, ??
-                    dSmooth=1e-4):
+                    dSmooth=1e-2):
     pFuncBCELoss = torch.nn.BCEWithLogitsLoss()
     pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
                                          pTensorTarget[:, 0, :, :, :],
@@ -131,7 +131,7 @@ def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
 
 def get_dice_coefficient(pTensorPredict: tensor,
                          pTensorTarget: tensor,
-                         dSmooth=1e-4):
+                         dSmooth=1e-2):
     pTensorPredict = pTensorPredict.contiguous().view(-1)
     pTensorTarget = pTensorTarget.contiguous().view(-1)
     pTensorIntersection = (pTensorPredict * pTensorTarget).sum()
@@ -147,11 +147,11 @@ class Convolution(Module):
         super(Convolution, self).__init__()
         self.network = torch.nn.Sequential(
             torch.nn.Conv3d(nDimInput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.BatchNorm3d(nDimOutput),
+            torch.nn.InstanceNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.BatchNorm3d(nDimOutput),
+            torch.nn.InstanceNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout)
         )
@@ -169,11 +169,11 @@ class ConvolutionForEncoder(Module):
         self.network = torch.nn.Sequential(
             # Down-sampling per 2 stride
             torch.nn.Conv3d(nDimInput, nDimOutput, kernel_size=3, stride=2, padding=0, bias=False),
-            torch.nn.BatchNorm3d(nDimOutput),
+            torch.nn.InstanceNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=2, stride=1, padding=1, bias=False),
-            torch.nn.BatchNorm3d(nDimOutput),
+            torch.nn.InstanceNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
         )
 
@@ -189,12 +189,13 @@ class ConvolutionForDecoder(Module):
         super(ConvolutionForDecoder, self).__init__()
         self.network = torch.nn.Sequential(
             torch.nn.Conv3d(nDimInput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.BatchNorm3d(nDimOutput),
+            torch.nn.InstanceNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
             torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=3, padding=1, bias=False),
-            torch.nn.BatchNorm3d(nDimOutput),
+            torch.nn.InstanceNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            torch.nn.Dropout3d(dRateDropout),
             torch.nn.Conv3d(nDimOutput, nDimOutput, kernel_size=1, stride=1),
             torch.nn.Softmax(dim=1)
         )
@@ -210,7 +211,7 @@ class UpSampler(Module):
         super(UpSampler, self).__init__()
         self.network = torch.nn.Sequential(
             torch.nn.ConvTranspose3d(nDimInput, nDimOutput, kernel_size=2, stride=2, bias=True),
-            torch.nn.BatchNorm3d(nDimOutput),
+            torch.nn.InstanceNorm3d(nDimOutput),
             torch.nn.LeakyReLU(negative_slope=0.2, inplace=True),
         )
 
@@ -519,7 +520,7 @@ def test(strRoot: str,
 
 
 if __name__ == '__main__':
-    mode = 'test'
+    mode = 'all'
     if mode == 'all':
         train(nEpoch=100,
               strRoot='',
@@ -528,7 +529,7 @@ if __name__ == '__main__':
               nCountDepth=4,
               nBatchSize=1,
               nCountWorker=2,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.5,
+              dRateDropout=0,
               dLearningRate=0.01,
               bInitEpoch=False)
         test(strRoot='',
@@ -536,7 +537,7 @@ if __name__ == '__main__':
              nChannel=8,  # 8 : colab / 4 : RTX2070
              nCountDepth=4,
              nCountWorker=2,  # 0: CPU / 2 : GPU
-             dRateDropout=0.3)
+             dRateDropout=0)
     elif mode == 'train':
         train(nEpoch=100,
               strRoot='',
@@ -545,7 +546,7 @@ if __name__ == '__main__':
               nCountDepth=4,
               nBatchSize=1,
               nCountWorker=2,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.5,
+              dRateDropout=0,
               dLearningRate=0.01,
               bInitEpoch=False)
     elif mode == 'test':
@@ -554,6 +555,6 @@ if __name__ == '__main__':
              nChannel=8,  # 8 : colab / 4 : RTX2070
              nCountDepth=4,
              nCountWorker=2,  # 0: CPU / 2 : GPU
-             dRateDropout=0.3)
+             dRateDropout=0)
     else:
         pass

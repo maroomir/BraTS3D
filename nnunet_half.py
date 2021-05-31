@@ -116,26 +116,17 @@ def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
     pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
                                          pTensorTarget[:, 0, :, :, :],
                                          dSmooth)
-    pTensorBceBG = pFuncBCELoss(pTensorPredict[:, 0, :, :, :],
-                                pTensorTarget[:, 0, :, :, :])
     pTensorDiceNCR = get_dice_coefficient(pTensorPredict[:, 1, :, :, :],
                                           pTensorTarget[:, 1, :, :, :],
                                           dSmooth)
-    pTensorBceNCR = pFuncBCELoss(pTensorPredict[:, 1, :, :, :],
-                                 pTensorTarget[:, 1, :, :, :])
     pTensorDiceED = get_dice_coefficient(pTensorPredict[:, 2, :, :, :],
                                          pTensorTarget[:, 2, :, :, :],
                                          dSmooth)
-    pTensorBceED = pFuncBCELoss(pTensorPredict[:, 2, :, :, :],
-                                pTensorTarget[:, 2, :, :, :])
     pTensorDiceSET = get_dice_coefficient(pTensorPredict[:, 3, :, :, :],
                                           pTensorTarget[:, 3, :, :, :],
                                           dSmooth)
-    pTensorBceSET = pFuncBCELoss(pTensorPredict[:, 3, :, :, :],
-                                 pTensorTarget[:, 3, :, :, :])
     pTensorDice = 1 - (pTensorDiceBG + pTensorDiceNCR + pTensorDiceED + pTensorDiceSET) / 4
-    pTensorBCE = (pTensorBceBG + pTensorBceNCR + pTensorBceED + pTensorBceSET) / 4
-    return pTensorDice + pTensorBCE
+    return pTensorDice + pFuncBCELoss(pTensorPredict, pTensorTarget)
 
 
 def get_dice_coefficient(pTensorPredict: tensor,
@@ -531,16 +522,16 @@ def test(strRoot: str,
 
 
 if __name__ == '__main__':
-    mode = 'train'
+    mode = 'all'
     if mode == 'all':
         train(nEpoch=100,
               strRoot='',
               strModelPath='model_nnunet_half.pth',
               nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
               nCountDepth=4,
-              nBatchSize=1,
+              nBatchSize=2,
               nCountWorker=0,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.3,
+              dRateDropout=0,
               dLearningRate=0.01,
               bInitEpoch=False)
         test(strRoot='',
@@ -548,16 +539,16 @@ if __name__ == '__main__':
              nChannel=8,  # 8 : colab / 4 : RTX2070
              nCountDepth=4,
              nCountWorker=2,  # 0: CPU / 2 : GPU
-             dRateDropout=0.3)
+             dRateDropout=0)
     elif mode == 'train':
         train(nEpoch=100,
               strRoot='',
               strModelPath='model_nnunet_half.pth',
               nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
               nCountDepth=4,
-              nBatchSize=1,
+              nBatchSize=2,
               nCountWorker=0,  # 0= CPU / 2 >= GPU
-              dRateDropout=0.3,
+              dRateDropout=0,
               dLearningRate=0.01,
               bInitEpoch=False)
     elif mode == 'test':
@@ -566,6 +557,6 @@ if __name__ == '__main__':
              nChannel=8,  # 8 : colab / 4 : RTX2070
              nCountDepth=4,
              nCountWorker=0,  # 0: CPU / 2 : GPU
-             dRateDropout=0.3)
+             dRateDropout=0)
     else:
         pass
