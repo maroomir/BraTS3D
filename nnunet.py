@@ -426,7 +426,7 @@ def train(nEpoch: int,
     nStart = 0
     print("Directory of the pre-trained model: {}".format(strModelPath))
     if strModelPath is not None and os.path.exists(strModelPath) and bInitEpoch is False:
-        pModelData = torch.load(strModelPath)
+        pModelData = torch.load(strModelPath, map_location=pDevice)
         nStart = pModelData['epoch']
         pModel.load_state_dict(pModelData['model'])
         pOptimizer.load_state_dict(pModelData['optimizer'])
@@ -444,7 +444,7 @@ def train(nEpoch: int,
         if math.isnan(dLoss):
             if strModelPath is not None and os.path.exists(strModelPath):
                 # Reload the best model and decrease the learning rate
-                pModelData = torch.load(strModelPath)
+                pModelData = torch.load(strModelPath, map_location=pDevice)
                 pModel.load_state_dict(pModelData['model'])
                 nStart = pModelData['epoch']
                 pOptimizerData = pModelData['optimizer']
@@ -484,7 +484,7 @@ def test(strRoot: str,
     # Define a network model
     pModel = nnUNet3D(nDimInput=4, nDimOutput=4, nChannel=nChannel, nCountDepth=nCountDepth,
                       dRateDropout=dRateDropout).to(pDevice)
-    pModelData = torch.load(strModelPath)
+    pModelData = torch.load(strModelPath, map_location=pDevice)
     pModel.load_state_dict(pModelData['model'])
     pModel.eval()
     print("Successfully load the Model in path")
@@ -512,19 +512,41 @@ def test(strRoot: str,
 
 
 if __name__ == '__main__':
-    train(nEpoch=100,
-          strRoot='',
-          strModelPath='model_nnunet.pth',
-          nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
-          nCountDepth=4,
-          nBatchSize=1,
-          nCountWorker=2,  # 0= CPU / 2 >= GPU
-          dRateDropout=0.3,
-          dLearningRate=0.01,
-          bInitEpoch=False)
-    test(strRoot='',
-         strModelPath='model_nnunet.pth',
-         nChannel=8,  # 8 : colab / 4 : RTX2070
-         nCountDepth=4,
-         nCountWorker=2,  # 0: CPU / 2 : GPU
-         dRateDropout=0)
+    mode = 'test'
+    if mode == 'all':
+        train(nEpoch=100,
+              strRoot='',
+              strModelPath='model_resunet.pth',
+              nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
+              nCountDepth=4,
+              nBatchSize=1,
+              nCountWorker=2,  # 0= CPU / 2 >= GPU
+              dRateDropout=0.3,
+              dLearningRate=0.01,
+              bInitEpoch=False)
+        test(strRoot='',
+             strModelPath='model_resunet.pth',
+             nChannel=8,  # 8 : colab / 4 : RTX2070
+             nCountDepth=4,
+             nCountWorker=2,  # 0: CPU / 2 : GPU
+             dRateDropout=0)
+    elif mode == 'train':
+        train(nEpoch=100,
+              strRoot='',
+              strModelPath='model_resunet.pth',
+              nChannel=8,  # 8 >= VRAM 9GB / 4 >= VRAM 6.5GB
+              nCountDepth=4,
+              nBatchSize=1,
+              nCountWorker=2,  # 0= CPU / 2 >= GPU
+              dRateDropout=0.3,
+              dLearningRate=0.01,
+              bInitEpoch=False)
+    elif mode == 'test':
+        test(strRoot='',
+             strModelPath='model_resunet.pth',
+             nChannel=8,  # 8 : colab / 4 : RTX2070
+             nCountDepth=4,
+             nCountWorker=2,  # 0: CPU / 2 : GPU
+             dRateDropout=0)
+    else:
+        pass

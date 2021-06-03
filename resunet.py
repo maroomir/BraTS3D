@@ -527,7 +527,7 @@ def test(strRoot: str,
 
 
 if __name__ == '__main__':
-    mode = 'train'
+    mode = 'test'
     if mode == 'all':
         train(nEpoch=100,
               strRoot='',
