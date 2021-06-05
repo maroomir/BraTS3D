@@ -316,8 +316,6 @@ class nnUNet3D(Module):
         pTensorResult = self.__unpadding(pTensorResult, *pPadOption)
         return pTensorResult
 ````
-- nnUNet을 설계한 후 BraTS 2020 Data를 Validation 해서 제출한 결과는 /result/Results-882041978798702490에 올려놨습니다.
-   
    
 5. 추가 개선
 - nnUNet 논문에서는 Loss Function을 구하기 위해 기존(Dice Loss) 방식과 BCELoss를 결합하기 때문에 이것을 그대로 반영해서 코드를 추가했습니다.
@@ -344,8 +342,8 @@ def get_dice_coefficient(pTensorPredict: tensor,
       * 초기 Learning rate, 이후 학습 정도에 따라 반감됨
    4) Drop-out rate : 0.5
       * 부족한 Batch 및 Data 크기에서 무작위성을 증대하기 위해 Drop-out rate 증가
-   - nnUNet을 위처럼 개선한 후 Validation 결과는 아래와 같습니다.
-     (5/28일 기준, 현재 제출 후 Pending 중입니다)
+  
+- nnUNet에 ResNet 방식을 적용해서 Test를 수행했습니다만, 큰 변화를 보진 못했습니다.
      
 ## 준비사항
 
