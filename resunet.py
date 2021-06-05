@@ -112,7 +112,6 @@ class BraTsDataset(Dataset):
 def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
                     pTensorTarget: tensor,  # Batch, 4, ??, ??, ??
                     dSmooth=1e-4):
-    pFuncBCELoss = torch.nn.BCEWithLogitsLoss()
     pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
                                          pTensorTarget[:, 0, :, :, :],
                                          dSmooth)
@@ -126,7 +125,7 @@ def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
                                           pTensorTarget[:, 3, :, :, :],
                                           dSmooth)
     pTensorDice = 1 - (pTensorDiceBG + pTensorDiceNCR + pTensorDiceED + pTensorDiceSET) / 4
-    return pTensorDice + pFuncBCELoss(pTensorPredict, pTensorTarget)
+    return pTensorDice
 
 
 def get_dice_coefficient(pTensorPredict: tensor,
@@ -527,7 +526,7 @@ def test(strRoot: str,
 
 
 if __name__ == '__main__':
-    mode = 'test'
+    mode = 'all'
     if mode == 'all':
         train(nEpoch=100,
               strRoot='',

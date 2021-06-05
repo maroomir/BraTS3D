@@ -112,7 +112,8 @@ class BraTsDataset(Dataset):
 def get_custom_loss(pTensorPredict: tensor,  # Batch, 4, ??, ??, ??
                     pTensorTarget: tensor,  # Batch, 4, ??, ??, ??
                     dSmooth=1e-2):
-    pFuncBCELoss = torch.nn.BCEWithLogitsLoss()
+    pFuncBCELoss = torch.nn.BCELoss()  # DON'T USE the BECLossWithLogistic
+    # Activate Function is ready to Predicted Target (with Softmax Activation)
     pTensorDiceBG = get_dice_coefficient(pTensorPredict[:, 0, :, :, :],
                                          pTensorTarget[:, 0, :, :, :],
                                          dSmooth)
