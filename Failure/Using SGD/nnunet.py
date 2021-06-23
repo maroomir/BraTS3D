@@ -430,7 +430,7 @@ def train(nEpoch: int,
     # Set the optimizer with SGD
     pOptimizer = torch.optim.SGD(pModel.parameters(), lr=dLearningRate)
     # Set the scheduler
-    pScheduler = torch.optim.lr_scheduler.StepLR(pOptimizer, step_size=1)
+    pScheduler = torch.optim.lr_scheduler.StepLR(pOptimizer, step_size=20, gamma=0.5)
     # Load pre-trained model
     nStart = 0
     print("Directory of the pre-trained model: {}".format(strModelPath))

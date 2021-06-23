@@ -421,7 +421,7 @@ def train(nEpoch: int,
     # Set the optimizer with adam
     pOptimizer = torch.optim.Adam(pModel.parameters(), lr=dLearningRate)
     # Set the scheduler
-    pScheduler = torch.optim.lr_scheduler.StepLR(pOptimizer, step_size=1)
+    pScheduler = torch.optim.lr_scheduler.StepLR(pOptimizer, step_size=20, gamma=0.5)
     # Load pre-trained model
     nStart = 0
     print("Directory of the pre-trained model: {}".format(strModelPath))
@@ -433,7 +433,6 @@ def train(nEpoch: int,
         print("## Successfully load the model at {} epochs!".format(nStart))
     # Train and Test Repeat
     dMinLoss = 10000.0
-    nCountDecrease = 0
     for iEpoch in range(nStart, nEpoch + 1):
         # Train the network
         __process_train(iEpoch, pModel=pModel, pDataLoader=pTrainLoader, pOptimizer=pOptimizer)
@@ -451,22 +450,11 @@ def train(nEpoch: int,
                 pOptimizerData['param_groups'][0]['lr'] /= 2  # Decrease the learning rate by 2
                 pOptimizer.load_state_dict(pOptimizerData)
                 print("## Rollback the model at {} epochs!".format(nStart))
-                nCountDecrease = 0
         # Save the optimal model
         elif dLoss <= dMinLoss:
             dMinLoss = dLoss
             torch.save({'epoch': iEpoch, 'model': pModel.state_dict(), 'optimizer': pOptimizer.state_dict()},
                        strModelPath)
-            nCountDecrease = 0
-        else:
-            nCountDecrease += 1
-            # Decrease the learning rate by 2 when the test loss decrease 3 times in a row
-            if nCountDecrease == 10:
-                pDicOptimizerState = pOptimizer.state_dict()
-                pDicOptimizerState['param_groups'][0]['lr'] /= 2
-                pOptimizer.load_state_dict(pDicOptimizerState)
-                print('learning rate is divided by 2')
-                nCountDecrease = 0
 
 
 def test(strRoot: str,
